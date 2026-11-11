@@ -28,6 +28,10 @@
      getThere    how you get in and out
 ------------------------------------------------------------------- */
 
+// Exchange rate used by the CAD / EUR toggle: how many euros one Canadian dollar buys.
+// This is a fixed number, not a live rate. Update it here when it drifts.
+const CAD_TO_EUR = 0.62;
+
 const COUNTRIES = {
   vn: { name: 'Vietnam',     flag: '🇻🇳', color: '#e84393' },
   th: { name: 'Thailand',    flag: '🇹🇭', color: '#ff7a1a' },

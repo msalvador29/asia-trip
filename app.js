@@ -4,7 +4,11 @@
 const $ = (s) => document.querySelector(s);
 const STORE = 'wanderboard.v1';
 const byId = Object.fromEntries(CITIES.map((c) => [c.id, c]));
-const money = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+// Prices are stored in CAD and converted for display.
+const CUR = { CAD: { sym: '$', rate: 1 }, EUR: { sym: '€', rate: CAD_TO_EUR } };
+const cur = () => CUR[state.cur];
+const money = (n) => cur().sym + Math.round(n * cur().rate).toLocaleString('en-CA');
+const moneyRange = (r) => r.split('–').map((p) => money(parseFloat(p.replace(/,/g, '')))).join('–');
 
 /* ---------- state ---------- */
 let state = load();
@@ -21,10 +25,11 @@ function load() {
         trip: s.trip.filter((t) => byId[t.id]),
         legCost: s.legCost || {},
         room: s.room === 'priv' ? 'priv' : 'dorm',
+        cur: s.cur === 'EUR' ? 'EUR' : 'CAD',
       };
     }
   } catch (e) { /* storage unavailable: start empty */ }
-  return { trip: [], legCost: {}, room: 'dorm' };
+  return { trip: [], legCost: {}, room: 'dorm', cur: 'CAD' };
 }
 function save() {
   try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -168,11 +173,11 @@ function renderCity() {
       ${c.note ? `<div class="note">📌 ${c.note}</div>` : ''}
 
       <div class="stats">
-        <div class="stat"><b>${money(c.hostel)}</b><small>dorm bed / night</small>${c.dormRange ? `<em>${c.dormRange.includes('–') ? 'range $' + c.dormRange : 'all $' + c.dormRange}</em>` : ''}</div>
-        <div class="stat"><b>${money(c.priv)}</b><small>private room / night</small>${c.privRange ? `<em>${c.privRange.includes('–') ? 'range $' + c.privRange : 'all $' + c.privRange}</em>` : ''}</div>
+        <div class="stat"><b>${money(c.hostel)}</b><small>dorm bed / night</small>${c.dormRange ? `<em>${c.dormRange.includes('–') ? 'range ' : 'all '}${moneyRange(c.dormRange)}</em>` : ''}</div>
+        <div class="stat"><b>${money(c.priv)}</b><small>private room / night</small>${c.privRange ? `<em>${c.privRange.includes('–') ? 'range ' : 'all '}${moneyRange(c.privRange)}</em>` : ''}</div>
         <div class="stat"><b>~${money(c.daily)}</b><small>spending / day</small><em>rough guess</em></div>
       </div>
-      <p class="source ${c.estimate ? 'warn' : ''}">${source} · CAD</p>
+      <p class="source ${c.estimate ? 'warn' : ''}">${source} · ${state.cur}</p>
 
       <h3>The vibe</h3>
       <p>${c.vibe}</p>
@@ -237,7 +242,7 @@ function renderTrip() {
     if (i > 0) {
       const l = legInfo(byId[state.trip[i - 1].id], c);
       leg = `<div class="leg"><span>${l.icon} ${Math.round(l.d).toLocaleString('en-CA')} km · ${l.mode}</span>
-        <label>$<input type="number" min="0" step="5" value="${l.cost}" data-leg="${l.key}" aria-label="Cost of this leg"></label></div>`;
+        <label>${cur().sym}<input type="number" min="0" step="5" value="${Math.round(l.cost * cur().rate)}" data-leg="${l.key}" aria-label="Cost of this leg"></label></div>`;
     }
     return leg + `
       <div class="stop">
@@ -282,7 +287,7 @@ function renderTrip() {
         <div><dt><i style="background:#ff5a4e"></i>${state.room === 'priv' ? 'Private rooms' : 'Dorm beds'}</dt><dd>${money(t.beds)}</dd></div>
         <div><dt><i style="background:#ffb627"></i>Food, fun, scooters</dt><dd>~${money(t.daily)}</dd></div>
         <div><dt><i style="background:#12b5a6"></i>Getting between stops</dt><dd>~${money(t.transport)}</dd></div>
-        <div class="total"><dt>${t.nights} nights · CAD</dt><dd>${money(t.total)}</dd></div>
+        <div class="total"><dt>${t.nights} nights · ${state.cur}</dt><dd>${money(t.total)}</dd></div>
       </dl>
       <small>${money(t.nights ? t.total / t.nights : 0)} a day on average. ${state.room === 'priv' ? 'Private price is per room; spending is per person.' : 'Per person.'} Flights to and from Asia not included.</small>
     </div>`;
@@ -296,7 +301,12 @@ function renderChips() {
       `<button class="${filter === k ? 'on' : ''}" style="--c:${co.color}" data-act="filter" data-c="${k}">${co.flag} <span>${co.name}</span></button>`).join('');
 }
 
-function render() { save(); renderChips(); renderCity(); renderTrip(); updateMap(); }
+function renderCurrency() {
+  $('#curToggle').innerHTML = ['CAD', 'EUR'].map((k) =>
+    `<button data-act="cur" data-cur="${k}" class="${state.cur === k ? 'on' : ''}">${CUR[k].sym} ${k}</button>`).join('');
+}
+
+function render() { save(); renderChips(); renderCity(); renderTrip(); renderCurrency(); updateMap(); }
 
 /* ---------- trip edits ---------- */
 function setDays(id, delta) {
@@ -353,6 +363,7 @@ document.addEventListener('click', (e) => {
     case 'up': move(id, -1); break;
     case 'down': move(id, 1); break;
     case 'room': state.room = b.dataset.room; break;
+    case 'cur': state.cur = b.dataset.cur; break;
     case 'optimize': optimize(); render(); fitTo(state.trip.map((t) => byId[t.id])); return;
     case 'clear':
       if (!confirm('Remove every stop from your trip?')) return;
@@ -374,7 +385,7 @@ document.addEventListener('change', (e) => {
   const key = e.target.dataset && e.target.dataset.leg;
   if (!key) return;
   const v = parseFloat(e.target.value);
-  if (isNaN(v) || v < 0) delete state.legCost[key]; else state.legCost[key] = v;
+  if (isNaN(v) || v < 0) delete state.legCost[key]; else state.legCost[key] = v / cur().rate;
   render();
 });
 
